@@ -1,0 +1,99 @@
+# Create a basic frontend HTML file to preview and approve images using FastAPI's /preview-images and /approve-image routes
+
+frontend_html = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Content Approval Dashboard</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #f5f5f5;
+      padding: 2rem;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      background: white;
+      padding: 1rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    img {
+      width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    button {
+      margin-top: 0.5rem;
+      padding: 0.4rem 0.8rem;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      background-color: #2d89ef;
+      color: white;
+    }
+    button:disabled {
+      background-color: #ccc;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧠 Content Approval Dashboard</h1>
+  <div class="grid" id="preview-grid"></div>
+
+  <script>
+    const API_KEY = prompt("Enter API Key");
+
+    async function fetchPreviews() {
+      const res = await fetch('/preview-images', {
+        headers: { 'X-API-Key': API_KEY }
+      });
+      const data = await res.json();
+      const grid = document.getElementById('preview-grid');
+      data.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = `
+          <img src="${item.url}" alt="preview">
+          <p><strong>Prompt:</strong><br>${item.prompt}</p>
+          <button ${item.approved ? "disabled" : ""} onclick="approveImage('${item.id}', this)">Approve</button>
+        `;
+        grid.appendChild(div);
+      });
+    }
+
+    async function approveImage(id, btn) {
+      const res = await fetch('/approve-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': API_KEY
+        },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) {
+        btn.innerText = "Approved";
+        btn.disabled = true;
+      }
+    }
+
+    fetchPreviews();
+  </script>
+</body>
+</html>
+"""
+
+with open("/mnt/data/frontend.html", "w") as f:
+    f.write(frontend_html.strip())
