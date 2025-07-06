@@ -1,46 +1,56 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Header, HTTPException, Depends
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import requests
 import os
 import openai
+import uuid
+import json
 from dotenv import load_dotenv
-from fastapi import Header, HTTPException, Depends
-
-
-#API Function
-
-def verify_api_key(x_api_key: str = Header(...)):
-    expected_key = os.getenv("API_KEY")
-    if x_api_key != expected_key:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-
 
 load_dotenv()
 
 app = FastAPI()
 
+# Environment Variables
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# Security: API Key Verification
+def verify_api_key(x_api_key: str = Header(...)):
+    expected_key = os.getenv("API_KEY")
+    if x_api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+# Request Schemas
 class PostRequest(BaseModel):
     topic: str
 
+class ImageRequest(BaseModel):
+    prompt: str
+
+class PromptRequest(BaseModel):
+    topic: str
+    style: str = "clean, bold, legal-themed, white background, centered text"
+
+class PublishRequest(BaseModel):
+    id: str
+
+class ApproveRequest(BaseModel):
+    id: str
+
+# Generate Caption (GPT-4o)
 @app.post("/generate-post")
 async def generate_post(data: PostRequest, auth=Depends(verify_api_key)):
     prompt = f"Create an Instagram caption about this topic: {data.topic}. Make it punchy, smart, and with a clear CTA."
-    
     response = openai.ChatCompletion.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7
     )
-
     caption = response["choices"][0]["message"]["content"]
     return {"caption": caption}
 
-class ImageRequest(BaseModel):
-    prompt: str
-
+# Generate Image (Ideogram)
 @app.post("/generate-image")
 async def generate_image(data: ImageRequest, auth=Depends(verify_api_key)):
     headers = {
@@ -49,64 +59,103 @@ async def generate_image(data: ImageRequest, auth=Depends(verify_api_key)):
     }
     body = {
         "prompt": data.prompt,
-        "model": "ideogram-v3"  # adjust based on actual model name
+        "model": "ideogram-v3",
+        "generation_speed": "default"
     }
 
     response = requests.post("https://api.ideogram.ai/generate", headers=headers, json=body)
-    return response.json()
+    result = response.json()
+    image_url = result.get("image_url")
 
-class PromptRequest(BaseModel):
-    topic: str
-    style: str = "clean, bold, legal-themed, white background, centered text"
+    if not image_url:
+        return {"error": "No image URL returned from Ideogram"}
 
+    os.makedirs("images", exist_ok=True)
+    image_id = str(uuid.uuid4())
+    image_path = f"images/{image_id}.png"
+    img_data = requests.get(image_url).content
 
-# Prompt Bulder
+    with open(image_path, "wb") as handler:
+        handler.write(img_data)
+
+    preview_meta = {
+        "id": image_id,
+        "prompt": data.prompt,
+        "path": image_path,
+        "url": f"/preview-image/{image_id}",
+        "approved": False
+    }
+
+    with open("preview_log.json", "a") as f:
+        f.write(json.dumps(preview_meta) + "\n")
+
+    return {
+        "message": "Image generated and cached",
+        "image_path": image_path,
+        "image_url": f"/preview-image/{image_id}"
+    }
+
+# Build Prompt
 @app.post("/build-prompt")
 def build_prompt(data: PromptRequest, auth=Depends(verify_api_key)):
-    prompt = (
-        f"Create a graphic for: '{data.topic}'. "
-        f"Style should be {data.style}. Must be readable on Instagram and Facebook."
-    )
-
-# Preview
-
+    prompt = f"Create a graphic for: '{data.topic}'. Style should be {data.style}. Must be readable on Instagram and Facebook."
     return {"prompt": prompt}
-import json
 
+# Save Preview (manual store)
 @app.post("/preview")
 async def save_preview(request: Request, auth=Depends(verify_api_key)):
     body = await request.json()
-    
     with open("previews.json", "a") as f:
         f.write(json.dumps(body) + "\n")
-    
     return {"message": "Preview saved"}
 
-#Publish Route Meta
+# Serve Cached Image
+@app.get("/preview-image/{image_id}")
+async def preview_image(image_id: str, auth=Depends(verify_api_key)):
+    image_path = f"images/{image_id}.png"
+    if os.path.exists(image_path):
+        return FileResponse(image_path, media_type="image/png")
+    return {"error": "Image not found"}
 
-class PublishRequest(BaseModel):
-    caption: str
-    image_url: str
+# List All Previews
+@app.get("/preview-images")
+def list_previews(auth=Depends(verify_api_key)):
+    previews = []
+    if os.path.exists("preview_log.json"):
+        with open("preview_log.json", "r") as f:
+            for line in f:
+                previews.append(json.loads(line))
+    return previews
 
-@app.post("/publish")
-async def publish_post(data: PublishRequest, auth=Depends(verify_api_key)):
+# Approve Image
+@app.post("/approve-image")
+def approve_image(data: ApproveRequest, auth=Depends(verify_api_key)):
+    updated_previews = []
+    found = False
 
-    # Replace with Meta Graph API code
-	# Meta Posting Helper
+    with open("preview_log.json", "r") as f:
+        for line in f:
+            item = json.loads(line)
+            if item["id"] == data.id:
+                item["approved"] = True
+                found = True
+            updated_previews.append(item)
 
-    return {
-        "message": "Mock publish complete",
-        "platforms": ["Instagram", "Facebook"],
-        "caption": data.caption,
-        "image_url": data.image_url
-    }
+    if not found:
+        return {"error": "Image ID not found"}
 
+    with open("preview_log.json", "w") as f:
+        for item in updated_previews:
+            f.write(json.dumps(item) + "\n")
+
+    return {"message": "Image approved", "id": data.id}
+
+# Meta Publishing Logic
 def publish_to_meta(image_path, caption):
     access_token = os.getenv("META_ACCESS_TOKEN")
     fb_page_id = os.getenv("FB_PAGE_ID")
     ig_business_id = os.getenv("IG_BUSINESS_ID")
 
-    # Upload image to Facebook Page
     with open(image_path, "rb") as f:
         files = {"source": f}
         fb_response = requests.post(
@@ -114,44 +163,34 @@ def publish_to_meta(image_path, caption):
             data={"caption": caption, "access_token": access_token},
             files=files
         )
-    
+
     fb_result = fb_response.json()
 
-    # Step 1: Upload to Instagram Container
-    image_url = fb_result.get("post_id")  # You could also reupload the image
+    image_url = fb_result.get("post_id")
     ig_image_upload = requests.post(
         f"https://graph.facebook.com/v19.0/{ig_business_id}/media",
         data={
-            "image_url": fb_result.get("image_url", ""),  # fallback if needed
+            "image_url": fb_result.get("image_url", ""),
             "caption": caption,
             "access_token": access_token
         }
     )
+
     container = ig_image_upload.json()
     creation_id = container.get("id")
 
-    # Step 2: Publish Instagram post
     if creation_id:
         ig_publish = requests.post(
             f"https://graph.facebook.com/v19.0/{ig_business_id}/media_publish",
             data={"creation_id": creation_id, "access_token": access_token}
         )
-        return {
-            "fb": fb_result,
-            "ig": ig_publish.json()
-        }
+        return {"fb": fb_result, "ig": ig_publish.json()}
     else:
         return {"fb": fb_result, "ig_error": container}
 
-#  Publish Endpoint
-
-
-class PublishRequest(BaseModel):
-    id: str  # This should be the image ID from your cache
-
+# Final Publish Route
 @app.post("/publish")
-def publish_image(data: PublishRequest):
-    # Load preview metadata
+def publish_image(data: PublishRequest, auth=Depends(verify_api_key)):
     found = False
     with open("preview_log.json", "r") as f:
         previews = [json.loads(line) for line in f]
@@ -163,4 +202,3 @@ def publish_image(data: PublishRequest):
             return {"status": "posted", "details": result}
 
     return {"error": "Image not approved or ID not found"}
-
