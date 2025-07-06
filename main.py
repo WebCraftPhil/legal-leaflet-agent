@@ -207,5 +207,5 @@ def publish_image(data: PublishRequest, auth=Depends(verify_api_key)):
     return {"error": "Image not approved or ID not found"}
 """
 
-with open("/mnt/data/main.py", "w") as f:
+with open("main.py", "w") as f:
     f.write(main_py_code.strip())
