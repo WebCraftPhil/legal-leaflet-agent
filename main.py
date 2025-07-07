@@ -1,6 +1,3 @@
-# Save the complete main.py file for Phil as requested.
-
-main_py_code = """
 from fastapi import FastAPI, Request, Header, HTTPException, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -14,6 +11,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI()
+
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"message": "Server is running"}
+
+@app.post("/generate")
+def generate_content():
+    return {"status": "success", "message": "Generated content here"}
+
+
 
 # Environment Variables
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -90,7 +101,7 @@ async def generate_image(data: ImageRequest, auth=Depends(verify_api_key)):
     }
 
     with open("preview_log.json", "a") as f:
-        f.write(json.dumps(preview_meta) + "\\n")
+        f.write(json.dumps(preview_meta) + "\n")
 
     return {
         "message": "Image generated and cached",
@@ -109,7 +120,7 @@ def build_prompt(data: PromptRequest, auth=Depends(verify_api_key)):
 async def save_preview(request: Request, auth=Depends(verify_api_key)):
     body = await request.json()
     with open("previews.json", "a") as f:
-        f.write(json.dumps(body) + "\\n")
+        f.write(json.dumps(body) + "\n")
     return {"message": "Preview saved"}
 
 # Serve Cached Image
@@ -149,7 +160,7 @@ def approve_image(data: ApproveRequest, auth=Depends(verify_api_key)):
 
     with open("preview_log.json", "w") as f:
         for item in updated_previews:
-            f.write(json.dumps(item) + "\\n")
+            f.write(json.dumps(item) + "\n")
 
     return {"message": "Image approved", "id": data.id}
 
@@ -205,7 +216,13 @@ def publish_image(data: PublishRequest, auth=Depends(verify_api_key)):
             return {"status": "posted", "details": result}
 
     return {"error": "Image not approved or ID not found"}
-"""
 
-with open("main.py", "w") as f:
-    f.write(main_py_code.strip())
+
+
+##Open Frontend
+from fastapi.responses import HTMLResponse
+
+@app.get("/", response_class=HTMLResponse)
+def root():
+    with open("frontend.html") as f:
+        return f.read()
